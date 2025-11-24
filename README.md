@@ -83,28 +83,47 @@ gomentum/
     go run cmd/gomentum/main.go
     ```
 
-## Todo
+## Roadmap
 
-### Phase 1: Foundation
-- [x] Initialize Go module and directory structure.
-- [x] Implement basic REPL loop (read-eval-print).
-- [ ] Integrate `adk-go` for agent reasoning.
+### Phase 1: Foundation (Completed)
+- [x] **Core Agent**: REPL loop with LLM integration (DeepSeek/OpenAI).
+- [x] **MCP Implementation**: Full Model Context Protocol server with tools (`add_task`, `list_tasks`, etc.).
+- [x] **Persistence**: SQLite database for robust task storage.
+- [x] **Concurrency**: Background worker for task monitoring.
+- [x] **Notifications**: Cross-platform system notifications (Toast/Banner).
+- [x] **Conflict Detection**: Smart scheduling with overlap warnings.
 
-### Phase 2: Core Logic (MCP)
-- [ ] Define MCP server structure.
-- [ ] Implement `list_tools` and `call_tool` handlers.
-- [ ] Create `Planner` struct for in-memory task management.
-- [ ] Implement `add_task` and `list_tasks` tools.
+### Phase 2: Backend Engineering (In Progress)
+Transforming Gomentum into a production-grade backend system.
 
-### Phase 3: Concurrency & IO
-- [ ] Implement background worker for task reminders (Goroutines).
-- [ ] Add file persistence (save/load tasks to JSON/Markdown).
-- [ ] Handle graceful shutdown and context cancellation.
+#### 1. Architecture Upgrade (Clean Architecture)
+- [ ] **Refactor**: Decouple UI/CLI from business logic.
+- [ ] **Layers**: Implement strict Handler -> Service -> Repository layering.
+- [ ] **Dependency Injection**: Improve testability and modularity.
 
-### Phase 4: Refinement
-- [ ] Improve prompt engineering for task decomposition.
-- [ ] Add CLI flags for configuration.
-- [ ] Write unit tests for core logic.
+#### 2. Storage & Data Integrity
+- [ ] **PostgreSQL**: Migrate from SQLite to Dockerized PostgreSQL.
+- [ ] **Migrations**: Implement schema version control (e.g., `golang-migrate`).
+- [ ] **ORM/Builder**: Switch to `sqlx` or `GORM` for better query management.
+
+#### 3. Distributed Systems & Performance
+- [ ] **Redis**: Introduce Redis for caching and task queuing.
+- [ ] **Asynq**: Replace polling loop with a distributed task queue (`hibiken/asynq`) for precise delayed execution.
+- [ ] **Scalability**: Decouple the scheduler from the executor.
+
+#### 4. API & Interface
+- [ ] **RESTful API**: Expose functionality via HTTP (Gin/Echo).
+- [ ] **gRPC**: Implement high-performance RPC endpoints.
+- [ ] **Headless Mode**: Run as a background daemon/service.
+
+#### 5. Observability (DevOps)
+- [ ] **Structured Logging**: Implement `uber-go/zap` for JSON logs.
+- [ ] **Metrics**: Expose Prometheus metrics (task counts, latency, queue depth).
+- [ ] **Tracing**: Add OpenTelemetry for request tracing.
+
+#### 6. Infrastructure
+- [ ] **Docker**: Containerize the application, DB, and Redis.
+- [ ] **CI/CD**: GitHub Actions for automated testing and linting.
 
 ## License
 
