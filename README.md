@@ -1,40 +1,112 @@
-# 🚀 Gomentum: Project Requirements Document
+# Gomentum
 
-> **Project Name**: Gomentum (Go + Momentum)
-> **Slogan**: Build momentum with a Go-powered, MCP-native planning agent.
-> **Version**: v0.1.0 (MVP)
-> **Author**: zuquanzhi
-> **Status**: Ready for Development
+Gomentum is a CLI-based planning agent powered by LLMs.
 
------
+It acts as an intelligent task decomposer rather than a simple todo list. By leveraging the **Google adk-go** (Agent Development Kit) and **Model Context Protocol (MCP)**, it connects a reasoning engine with local execution tools to break down high-level goals into actionable schedules.
 
-## 1\. 项目概述 (Executive Summary)
+This project serves as a practical implementation of:
+- **Google adk-go**: Cutting-edge framework for building AI agents in Go.
+- **Model Context Protocol (MCP)**: Standardized interface for LLM tools.
+- **Go Concurrency Patterns**: Background task management.
+- **Clean Architecture**: Maintainable CLI structure.
 
-**Gomentum** 是一个基于 **Go 语言** 构建的终端（CLI）智能规划助手。它利用 **Google adk-go** 接入大模型（Gemini）作为推理大脑，并采用行业前沿的 **MCP (Model Context Protocol)** 协议来管理工具集。
+## Status
 
-### 1.1 核心价值
+**WIP** - Pre-alpha.
 
-  * **消除决策瘫痪**：将模糊的自然语言目标（如“这周学完 Go 并发”）自动拆解为可执行的时间表。
-  * **后端技术练兵**：在一个项目中完整实践 Go 的核心特性（Goroutines、Channels、Interfaces、File I/O）。
-  * **拥抱前沿标准**：通过实现 MCP 协议，使项目具备极高的可拓展性和“高星项目”气质。
+## Features
 
------
+- **Natural Language Interface**: REPL-based interaction.
+- **Agentic Workflow**: Built with `adk-go` to handle complex reasoning and task decomposition.
+- **MCP Native**: Strictly follows the Model Context Protocol specification.
+- **Flexible LLM Support**: Compatible with Gemini, OpenAI, or any OpenAI-compatible endpoint.
+- **Concurrency**: Background timers and notifications using Go routines.
 
-## 2\. 功能需求 (Functional Requirements)
+## Tech Stack
 
-### 2.1 交互界面 (User Interface)
+- **Go 1.23+**
+- **Google adk-go** (Agent Framework)
+- **mark3labs/mcp-go** (MCP Implementation)
 
-  * **纯终端交互 (CLI)**：无需前端页面。
-  * **REPL 模式**：启动后显示 `Gomentum >` 提示符，持续接收用户输入，直到用户输入 `exit`。
-  * **流式反馈**：在 AI 思考或执行工具时，终端应有简单的状态提示（如 "Thinking..." 或 "✅ Scheduled"）。
+## Project Structure
 
-### 2.2 核心功能模块
+```text
+gomentum/
+├── cmd/
+│   └── gomentum/        # Entry point
+├── internal/
+│   ├── agent/           # LLM integration
+│   ├── mcp/             # MCP server & tool definitions
+│   ├── planner/         # Core domain logic
+│   └── tui/             # Terminal UI / REPL
+├── pkg/                 # Shared libraries
+└── README.md
+```
 
-| 功能 ID | 功能名称 | 详细描述 | 涉及技术点 |
-| :--- | :--- | :--- | :--- |
-| **F-01** | **智能任务拆解** | 用户输入宏观目标，Agent 自动推理并生成多个具体的时间段任务。 | ADK (Reasoning), Prompt Engineering |
-| **F-02** | **日程存储 (内存)** | 将生成的任务暂存在内存中，支持增删改查。 | Go Slices, Structs, Pointers |
-| **F-03** | **异步提醒** | 用户要求提醒时，后台启动倒计时，时间到后在终端高亮提示。 | **Goroutines**, `time.Sleep` |
-| **F-04** | **文档导出** | 将当前的规划结果导出为 Markdown 文件。 | `os` Package, File I/O |
-| **F-05** | **MCP 工具化** | 所有上述功能（F-02\~F-04）必须封装为 MCP Tool 标准。 | `mark3labs/mcp-go` |
+## Quick Start
+
+1.  **Clone & Init**
+    ```bash
+    git clone https://github.com/zuquanzhi/gomentum.git
+    cd gomentum
+    go mod tidy
+    ```
+
+2.  **Config**
+    Configure your LLM provider. You can use Gemini, OpenAI, or any custom endpoint.
+
+    **Example: DeepSeek**
+    ```bash
+    # Linux/macOS
+    export LLM_API_KEY="sk-..."
+    export LLM_BASE_URL="https://api.deepseek.com/v1"
+    export LLM_MODEL="deepseek-chat"
+    
+    # Windows PowerShell
+    $env:LLM_API_KEY="sk-..."
+    $env:LLM_BASE_URL="https://api.deepseek.com/v1"
+    $env:LLM_MODEL="deepseek-chat"
+    ```
+
+    **Example: Gemini**
+    ```bash
+    # Linux/macOS
+    export LLM_API_KEY="your_gemini_key"
+    # LLM_BASE_URL is not needed for Gemini default
+    
+    # Windows PowerShell
+    $env:LLM_API_KEY="your_gemini_key"
+    ```
+
+3.  **Run**
+    ```bash
+    go run cmd/gomentum/main.go
+    ```
+
+## Todo
+
+### Phase 1: Foundation
+- [x] Initialize Go module and directory structure.
+- [x] Implement basic REPL loop (read-eval-print).
+- [ ] Integrate `adk-go` for agent reasoning.
+
+### Phase 2: Core Logic (MCP)
+- [ ] Define MCP server structure.
+- [ ] Implement `list_tools` and `call_tool` handlers.
+- [ ] Create `Planner` struct for in-memory task management.
+- [ ] Implement `add_task` and `list_tasks` tools.
+
+### Phase 3: Concurrency & IO
+- [ ] Implement background worker for task reminders (Goroutines).
+- [ ] Add file persistence (save/load tasks to JSON/Markdown).
+- [ ] Handle graceful shutdown and context cancellation.
+
+### Phase 4: Refinement
+- [ ] Improve prompt engineering for task decomposition.
+- [ ] Add CLI flags for configuration.
+- [ ] Write unit tests for core logic.
+
+## License
+
+MIT
 
