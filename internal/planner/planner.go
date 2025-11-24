@@ -92,6 +92,24 @@ func (p *Planner) ListTasks() ([]Task, error) {
 	return tasks, nil
 }
 
+// CheckOverlap checks if the given time range overlaps with any existing task.
+// Returns the conflicting task if found. excludeID is used when updating a task to ignore itself.
+func (p *Planner) CheckOverlap(start, end time.Time, excludeID int) (*Task, error) {
+	query := `SELECT id, title, description, start_time, end_time, status FROM tasks 
+	          WHERE id != ? AND start_time < ? AND end_time > ?`
+
+	row := p.db.QueryRow(query, excludeID, end, start)
+
+	var t Task
+	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+	return &t, nil
+}
+
 // GetTask finds a task by ID
 func (p *Planner) GetTask(id int) (Task, error) {
 	query := `SELECT id, title, description, start_time, end_time, status FROM tasks WHERE id = ?`

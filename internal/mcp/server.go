@@ -94,6 +94,19 @@ func (s *Server) handleAddTask(ctx context.Context, request mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("Invalid end_time format: %v", err)), nil
 	}
 
+	// Check for overlap
+	allowOverlap, _ := args["allow_overlap"].(bool)
+	if !allowOverlap {
+		conflict, err := s.planner.CheckOverlap(startTime, endTime, 0)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to check overlap: %v", err)), nil
+		}
+		if conflict != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Time conflict with existing task: '%s' (ID: %d) from %s to %s. Set allow_overlap=true to force.",
+				conflict.Title, conflict.ID, conflict.StartTime.Format("15:04"), conflict.EndTime.Format("15:04"))), nil
+		}
+	}
+
 	task, err := s.planner.AddTask(title, desc, startTime, endTime)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to add task: %v", err)), nil
@@ -169,6 +182,19 @@ func (s *Server) handleUpdateTask(ctx context.Context, request mcp.CallToolReque
 		}
 	}
 
+	// Check for overlap
+	allowOverlap, _ := args["allow_overlap"].(bool)
+	if !allowOverlap {
+		conflict, err := s.planner.CheckOverlap(task.StartTime, task.EndTime, task.ID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to check overlap: %v", err)), nil
+		}
+		if conflict != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Time conflict with existing task: '%s' (ID: %d) from %s to %s. Set allow_overlap=true to force.",
+				conflict.Title, conflict.ID, conflict.StartTime.Format("15:04"), conflict.EndTime.Format("15:04"))), nil
+		}
+	}
+
 	if err := s.planner.UpdateTask(task); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to update task: %v", err)), nil
 	}
@@ -214,6 +240,7 @@ func (s *Server) GetTools() []mcp.Tool {
 			mcp.WithString("description", mcp.Description("Detailed description of the task")),
 			mcp.WithString("start_time", mcp.Required(), mcp.Description("Start time in RFC3339 format (e.g. 2023-10-01T14:00:00Z)")),
 			mcp.WithString("end_time", mcp.Required(), mcp.Description("End time in RFC3339 format")),
+			mcp.WithBoolean("allow_overlap", mcp.Description("Set to true to allow scheduling even if there is a conflict")),
 		),
 		mcp.NewTool("list_tasks",
 			mcp.WithDescription("List all scheduled tasks"),
@@ -230,6 +257,7 @@ func (s *Server) GetTools() []mcp.Tool {
 			mcp.WithString("start_time", mcp.Description("The new start time (RFC3339)")),
 			mcp.WithString("end_time", mcp.Description("The new end time (RFC3339)")),
 			mcp.WithString("status", mcp.Description("The new status (pending, completed, in_progress)")),
+			mcp.WithBoolean("allow_overlap", mcp.Description("Set to true to allow scheduling even if there is a conflict")),
 		),
 		mcp.NewTool("delete_task",
 			mcp.WithDescription("Delete a task by ID"),

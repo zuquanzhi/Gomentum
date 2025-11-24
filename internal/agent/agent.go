@@ -66,7 +66,7 @@ func NewAgent(mcpServer *gmcp.Server) (Agent, error) {
 func (a *OpenAIAgent) Chat(ctx context.Context, prompt string) (string, error) {
 	// Update system prompt with current time
 	if len(a.history) > 0 && a.history[0].Role == openai.ChatMessageRoleSystem {
-		a.history[0].Content = fmt.Sprintf("You are Gomentum, a helpful planning assistant. The current time is %s. When scheduling tasks, use this time as reference.", time.Now().Format("2006-01-02 15:04:05"))
+		a.history[0].Content = fmt.Sprintf("You are Gomentum, a helpful planning assistant. The current time is %s. When scheduling tasks, use this time as reference. If the user provides a relative time (like 'tomorrow', 'next Monday'), calculate the absolute date and EXECUTE the tool immediately. Do not ask for confirmation unless the time is ambiguous. Be concise.", time.Now().Format("2006-01-02 15:04:05"))
 	}
 
 	// Add user message to history
