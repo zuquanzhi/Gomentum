@@ -17,6 +17,7 @@ type Task struct {
 	StartTime   time.Time `json:"start_time"`
 	EndTime     time.Time `json:"end_time"`
 	Status      string    `json:"status"` // "pending", "completed", "in_progress"
+	Reminded    bool      `json:"reminded"`
 }
 
 // Planner manages a list of tasks using SQLite
@@ -39,19 +40,23 @@ func NewPlanner(dbPath string) (*Planner, error) {
 		description TEXT,
 		start_time DATETIME NOT NULL,
 		end_time DATETIME NOT NULL,
-		status TEXT DEFAULT 'pending'
+		status TEXT DEFAULT 'pending',
+		reminded BOOLEAN DEFAULT 0
 	);
 	`
 	if _, err := db.Exec(query); err != nil {
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
+	// Try to add reminded column if it doesn't exist (migration for existing db)
+	_, _ = db.Exec(`ALTER TABLE tasks ADD COLUMN reminded BOOLEAN DEFAULT 0`)
+
 	return &Planner{db: db}, nil
 }
 
 // AddTask adds a new task to the planner
 func (p *Planner) AddTask(title, description string, start, end time.Time) (Task, error) {
-	query := `INSERT INTO tasks (title, description, start_time, end_time, status) VALUES (?, ?, ?, ?, ?)`
+	query := `INSERT INTO tasks (title, description, start_time, end_time, status, reminded) VALUES (?, ?, ?, ?, ?, 0)`
 	res, err := p.db.Exec(query, title, description, start, end, "pending")
 	if err != nil {
 		return Task{}, fmt.Errorf("failed to insert task: %w", err)
@@ -69,12 +74,13 @@ func (p *Planner) AddTask(title, description string, start, end time.Time) (Task
 		StartTime:   start,
 		EndTime:     end,
 		Status:      "pending",
+		Reminded:    false,
 	}, nil
 }
 
 // ListTasks returns all tasks
 func (p *Planner) ListTasks() ([]Task, error) {
-	query := `SELECT id, title, description, start_time, end_time, status FROM tasks ORDER BY start_time ASC`
+	query := `SELECT id, title, description, start_time, end_time, status, reminded FROM tasks ORDER BY start_time ASC`
 	rows, err := p.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tasks: %w", err)
@@ -84,7 +90,7 @@ func (p *Planner) ListTasks() ([]Task, error) {
 	var tasks []Task
 	for rows.Next() {
 		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status, &t.Reminded); err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -92,16 +98,51 @@ func (p *Planner) ListTasks() ([]Task, error) {
 	return tasks, nil
 }
 
+// GetUpcomingTasks returns tasks starting within the given duration that haven't been reminded
+func (p *Planner) GetUpcomingTasks(d time.Duration) ([]Task, error) {
+	now := time.Now()
+	target := now.Add(d)
+
+	// We check for tasks that are due (start_time <= target) and haven't been reminded yet.
+	// We don't strictly enforce start_time > now to catch tasks that might have been missed
+	// if the poller was slow or the app was restarted.
+	query := `SELECT id, title, description, start_time, end_time, status, reminded FROM tasks 
+	          WHERE start_time <= ? AND reminded = 0 AND status != 'completed'`
+
+	rows, err := p.db.Query(query, target)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query upcoming tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var t Task
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status, &t.Reminded); err != nil {
+			return nil, fmt.Errorf("failed to scan task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
+}
+
+// MarkAsReminded marks a task as reminded
+func (p *Planner) MarkAsReminded(id int) error {
+	query := `UPDATE tasks SET reminded = 1 WHERE id = ?`
+	_, err := p.db.Exec(query, id)
+	return err
+}
+
 // CheckOverlap checks if the given time range overlaps with any existing task.
 // Returns the conflicting task if found. excludeID is used when updating a task to ignore itself.
 func (p *Planner) CheckOverlap(start, end time.Time, excludeID int) (*Task, error) {
-	query := `SELECT id, title, description, start_time, end_time, status FROM tasks 
+	query := `SELECT id, title, description, start_time, end_time, status, reminded FROM tasks 
 	          WHERE id != ? AND start_time < ? AND end_time > ?`
 
 	row := p.db.QueryRow(query, excludeID, end, start)
 
 	var t Task
-	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status); err != nil {
+	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status, &t.Reminded); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -112,11 +153,11 @@ func (p *Planner) CheckOverlap(start, end time.Time, excludeID int) (*Task, erro
 
 // GetTask finds a task by ID
 func (p *Planner) GetTask(id int) (Task, error) {
-	query := `SELECT id, title, description, start_time, end_time, status FROM tasks WHERE id = ?`
+	query := `SELECT id, title, description, start_time, end_time, status, reminded FROM tasks WHERE id = ?`
 	row := p.db.QueryRow(query, id)
 
 	var t Task
-	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status); err != nil {
+	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.StartTime, &t.EndTime, &t.Status, &t.Reminded); err != nil {
 		if err == sql.ErrNoRows {
 			return Task{}, fmt.Errorf("task with ID %d not found", id)
 		}
@@ -125,9 +166,9 @@ func (p *Planner) GetTask(id int) (Task, error) {
 	return t, nil
 }
 
-// UpdateTask updates an existing task
+// UpdateTask updates an existing task and resets the reminder status
 func (p *Planner) UpdateTask(t Task) error {
-	query := `UPDATE tasks SET title = ?, description = ?, start_time = ?, end_time = ?, status = ? WHERE id = ?`
+	query := `UPDATE tasks SET title = ?, description = ?, start_time = ?, end_time = ?, status = ?, reminded = 0 WHERE id = ?`
 	res, err := p.db.Exec(query, t.Title, t.Description, t.StartTime, t.EndTime, t.Status, t.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update task: %w", err)
@@ -178,7 +219,7 @@ func (p *Planner) ExportToMarkdown(filename string) error {
 	for _, t := range tasks {
 		fmt.Fprintf(f, "## %s\n", t.Title)
 		fmt.Fprintf(f, "- **ID**: %d\n", t.ID)
-		fmt.Fprintf(f, "- **Time**: %s - %s\n", t.StartTime.Format("15:04"), t.EndTime.Format("15:04"))
+		fmt.Fprintf(f, "- **Time**: %s - %s\n", t.StartTime.Local().Format("15:04"), t.EndTime.Local().Format("15:04"))
 		fmt.Fprintf(f, "- **Status**: %s\n", t.Status)
 		if t.Description != "" {
 			fmt.Fprintf(f, "- **Description**: %s\n", t.Description)

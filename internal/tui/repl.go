@@ -9,6 +9,9 @@ import (
 	"gomentum/internal/planner"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/gen2brain/beeep"
 )
 
 // Start launches the Read-Eval-Print Loop for Gomentum
@@ -35,6 +38,9 @@ func Start() {
 		return
 	}
 
+	// Start background reminder
+	go startReminder(p)
+
 	for {
 		fmt.Print("Gomentum > ")
 		if !scanner.Scan() {
@@ -56,6 +62,41 @@ func Start() {
 
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+	}
+}
+
+func startReminder(p *planner.Planner) {
+	// Check every 10 seconds for better responsiveness
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// Find tasks that are due now (or past due)
+		// We pass 0 duration because we want to trigger exactly at StartTime,
+		// not 15 minutes before.
+		tasks, err := p.GetUpcomingTasks(0)
+		if err != nil {
+			continue
+		}
+
+		for _, t := range tasks {
+			// Print notification
+			// Use \r to overwrite the prompt, then reprint prompt
+			fmt.Printf("\n\n🔔 [REMINDER] Task '%s' starts at %s!\n", t.Title, t.StartTime.Local().Format("15:04"))
+			if t.Description != "" {
+				fmt.Printf("   %s\n", t.Description)
+			}
+			fmt.Print("\nGomentum > ")
+
+			// Send system notification
+			msg := fmt.Sprintf("Time: %s\n%s", t.StartTime.Local().Format("15:04"), t.Description)
+			if err := beeep.Notify("Gomentum Reminder", msg, ""); err != nil {
+				fmt.Printf("\n[System Notification Failed]: %v\n", err)
+			}
+
+			// Mark as reminded
+			_ = p.MarkAsReminded(t.ID)
+		}
 	}
 }
 

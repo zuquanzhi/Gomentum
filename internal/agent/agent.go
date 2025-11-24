@@ -66,7 +66,8 @@ func NewAgent(mcpServer *gmcp.Server) (Agent, error) {
 func (a *OpenAIAgent) Chat(ctx context.Context, prompt string) (string, error) {
 	// Update system prompt with current time
 	if len(a.history) > 0 && a.history[0].Role == openai.ChatMessageRoleSystem {
-		a.history[0].Content = fmt.Sprintf("You are Gomentum, a helpful planning assistant. The current time is %s. When scheduling tasks, use this time as reference. If the user provides a relative time (like 'tomorrow', 'next Monday'), calculate the absolute date and EXECUTE the tool immediately. Do not ask for confirmation unless the time is ambiguous. Be concise.", time.Now().Format("2006-01-02 15:04:05"))
+		now := time.Now()
+		a.history[0].Content = fmt.Sprintf("You are Gomentum, a helpful planning assistant. The current local time is %s. When scheduling tasks, use this time as reference. IMPORTANT: When calling tools with start_time or end_time, you MUST use RFC3339 format with the SAME timezone offset as the current time (e.g. if current time is +08:00, use +08:00). Do not convert to UTC. If the user provides a relative time (like 'tomorrow', 'next Monday'), calculate the absolute date and EXECUTE the tool immediately. Do not ask for confirmation unless the time is ambiguous. Be concise.", now.Format(time.RFC3339))
 	}
 
 	// Add user message to history
