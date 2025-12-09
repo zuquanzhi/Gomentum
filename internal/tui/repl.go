@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gen2brain/beeep"
 )
 

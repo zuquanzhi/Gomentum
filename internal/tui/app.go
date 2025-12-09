@@ -56,20 +56,20 @@ type model struct {
 	taskList    list.Model
 	senderStyle lipgloss.Style
 	err         error
-	
+
 	// App state
 	cfg     *config.Config
 	planner *planner.Planner
 	agent   agent.Agent
-	
+
 	// Chat state
 	messages    []string
 	isThinking  bool
 	currentResp string
-	
+
 	// Streaming
 	sub chan string
-	
+
 	// Layout
 	width  int
 	height int
@@ -135,19 +135,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		
+
 		// Layout: 30% Sidebar, 70% Chat
 		sidebarWidth := int(float64(msg.Width) * 0.3)
 		chatWidth := msg.Width - sidebarWidth - 4 // Margins
 
 		m.taskList.SetSize(sidebarWidth, msg.Height-2)
-		
+
 		m.textarea.SetWidth(chatWidth)
 		m.viewport.Width = chatWidth
 		m.viewport.Height = msg.Height - m.textarea.Height() - 4
-		
+
 		m.renderChat()
-		
+
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
@@ -156,21 +156,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isThinking {
 				return m, nil
 			}
-			
+
 			input := m.textarea.Value()
 			if strings.TrimSpace(input) == "" {
 				return m, nil
 			}
-			
+
 			m.messages = append(m.messages, "**You**: "+input)
 			m.renderChat()
 			m.textarea.Reset()
 			m.viewport.GotoBottom()
-			
+
 			m.isThinking = true
 			m.currentResp = ""
 			m.sub = make(chan string) // Reset channel
-			
+
 			// Start agent interaction
 			return m, tea.Batch(
 				m.startChat(input),
@@ -184,18 +184,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderChat()
 		m.viewport.GotoBottom()
 		return m, waitForActivity(m.sub) // Wait for next token
-		
+
 	case finishMsg:
 		m.isThinking = false
 		m.messages = append(m.messages, "**Gomentum**: "+m.currentResp)
 		m.currentResp = ""
 		// Refresh tasks after agent is done, as it might have changed them
 		return m, m.refreshTasks
-		
+
 	case errMsg:
 		m.err = msg
 		return m, nil
-		
+
 	case []list.Item:
 		m.taskList.SetItems(msg)
 	}
@@ -209,7 +209,7 @@ func (m model) View() string {
 		m.viewport.View(),
 		m.textarea.View(),
 	)
-	
+
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		appStyle.Render(m.taskList.View()),
@@ -222,7 +222,7 @@ func (m *model) renderChat() {
 	if m.currentResp != "" {
 		content += "\n\n**Gomentum**: " + m.currentResp
 	}
-	
+
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(m.viewport.Width),
@@ -240,7 +240,7 @@ func (m model) refreshTasks() tea.Msg {
 	if err != nil {
 		return errMsg(err)
 	}
-	
+
 	items := []list.Item{}
 	for _, t := range tasks {
 		items = append(items, taskItem{
