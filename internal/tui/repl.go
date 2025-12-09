@@ -15,32 +15,31 @@ import (
 	"github.com/gen2brain/beeep"
 )
 
+// WaitPressEnter pauses execution to allow user to read output before window closes
+func WaitPressEnter() {
+	fmt.Println("\nPress Enter to exit (or wait 30 seconds)...")
+
+	// Force a small sleep to prevent immediate skipping if there's buffered input
+	time.Sleep(500 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		_, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			// If reading fails (e.g. no stdin), wait for the timeout
+			return
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+	}
+}
+
 // Start launches the Bubble Tea TUI for Gomentum
 func Start() {
-	// Helper to pause before exit
-	waitExit := func() {
-		fmt.Println("\nPress Enter to exit (or wait 30 seconds)...")
-
-		// Force a small sleep to prevent immediate skipping if there's buffered input
-		time.Sleep(500 * time.Millisecond)
-
-		done := make(chan struct{})
-		go func() {
-			_, err := bufio.NewReader(os.Stdin).ReadString('\n')
-			if err != nil {
-				// If reading fails (e.g. no stdin), wait for the timeout
-				return
-			}
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(30 * time.Second):
-		}
-		os.Exit(1)
-	}
-
 	// Load Config
 	cfg, err := config.LoadConfig("config.yaml")
 	if err != nil {
@@ -51,7 +50,8 @@ func Start() {
 		fmt.Printf("Current Working Directory: %s\n", cwd)
 		fmt.Printf("Executable Path: %s\n", exe)
 		fmt.Println("Please ensure 'config.yaml' exists in the Current Working Directory.")
-		waitExit()
+		WaitPressEnter()
+		os.Exit(1)
 	}
 
 	// Initialize Planner
@@ -59,7 +59,8 @@ func Start() {
 	if err != nil {
 		slog.Error("Failed to initialize planner", "error", err)
 		fmt.Printf("\nError initializing database: %v\n", err)
-		waitExit()
+		WaitPressEnter()
+		os.Exit(1)
 	}
 	defer p.Close()
 
@@ -72,7 +73,8 @@ func Start() {
 		slog.Error("Failed to initialize agent", "error", err)
 		fmt.Printf("\nError initializing agent: %v\n", err)
 		fmt.Println("Please check your configuration (API Key, etc).")
-		waitExit()
+		WaitPressEnter()
+		os.Exit(1)
 	}
 
 	// Start background reminder
@@ -84,7 +86,8 @@ func Start() {
 	prog := tea.NewProgram(InitialModel(cfg, p, ag), tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
-		waitExit()
+		WaitPressEnter()
+		os.Exit(1)
 	}
 }
 
@@ -103,18 +106,11 @@ func startReminder(p *planner.Planner) {
 		}
 
 		for _, t := range tasks {
-			// Print notification
-			// Use \r to overwrite the prompt, then reprint prompt
-			fmt.Printf("\n\n🔔 [REMINDER] Task '%s' starts at %s!\n", t.Title, t.StartTime.Local().Format("15:04"))
-			if t.Description != "" {
-				fmt.Printf("   %s\n", t.Description)
-			}
-			fmt.Print("\nGomentum > ")
-
 			// Send system notification
 			msg := fmt.Sprintf("Time: %s\n%s", t.StartTime.Local().Format("15:04"), t.Description)
 			if err := beeep.Notify("Gomentum Reminder", msg, ""); err != nil {
-				fmt.Printf("\n[System Notification Failed]: %v\n", err)
+				// Silently fail or log to file if needed, but don't print to stdout
+				slog.Error("System notification failed", "error", err)
 			}
 
 			// Mark as reminded
@@ -122,5 +118,3 @@ func startReminder(p *planner.Planner) {
 		}
 	}
 }
-
-// handleInput is removed as it is now handled by the Bubble Tea model
