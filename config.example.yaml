@@ -1,0 +1,10 @@
+llm:
+  api_key: "your_api_key_here" # Set your API key here or use LLM_API_KEY env var
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"
+
+database:
+  path: "gomentum.db"
+
+agent:
+  max_history: 20

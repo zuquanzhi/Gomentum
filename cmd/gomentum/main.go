@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"gomentum/internal/tui"
 )
@@ -14,8 +15,18 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
-			fmt.Println("Press Enter to exit...")
-			bufio.NewReader(os.Stdin).ReadString('\n')
+			fmt.Println("Press Enter to exit (or wait 30s)...")
+			
+			done := make(chan struct{})
+			go func() {
+				bufio.NewReader(os.Stdin).ReadString('\n')
+				close(done)
+			}()
+			
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+			}
 		}
 	}()
 
@@ -30,5 +41,15 @@ func main() {
 
 	// Pause before exit to keep window open
 	fmt.Println("\nProgram finished. Press Enter to close window...")
-	bufio.NewReader(os.Stdin).ReadString('\n')
+	
+	done := make(chan struct{})
+	go func() {
+		bufio.NewReader(os.Stdin).ReadString('\n')
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+	}
 }

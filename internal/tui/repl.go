@@ -19,8 +19,25 @@ import (
 func Start() {
 	// Helper to pause before exit
 	waitExit := func() {
-		fmt.Println("\nPress Enter to exit...")
-		bufio.NewReader(os.Stdin).ReadString('\n')
+		fmt.Println("\nPress Enter to exit (or wait 30 seconds)...")
+
+		// Force a small sleep to prevent immediate skipping if there's buffered input
+		time.Sleep(500 * time.Millisecond)
+
+		done := make(chan struct{})
+		go func() {
+			_, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if err != nil {
+				// If reading fails (e.g. no stdin), wait for the timeout
+				return
+			}
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+		}
 		os.Exit(1)
 	}
 
