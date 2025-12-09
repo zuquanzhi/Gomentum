@@ -20,6 +20,14 @@ type Task struct {
 	Reminded    bool      `json:"reminded"`
 }
 
+// ChatMessage represents a stored chat message
+type ChatMessage struct {
+	ID        int       `json:"id"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Planner manages a list of tasks using SQLite
 type Planner struct {
 	db *sql.DB
@@ -32,8 +40,8 @@ func NewPlanner(dbPath string) (*Planner, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Create table if not exists
-	query := `
+	// Create tasks table if not exists
+	queryTasks := `
 	CREATE TABLE IF NOT EXISTS tasks (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		title TEXT NOT NULL,
@@ -44,8 +52,21 @@ func NewPlanner(dbPath string) (*Planner, error) {
 		reminded BOOLEAN DEFAULT 0
 	);
 	`
-	if _, err := db.Exec(query); err != nil {
-		return nil, fmt.Errorf("failed to create table: %w", err)
+	if _, err := db.Exec(queryTasks); err != nil {
+		return nil, fmt.Errorf("failed to create tasks table: %w", err)
+	}
+
+	// Create chat_history table if not exists
+	queryHistory := `
+	CREATE TABLE IF NOT EXISTS chat_history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		role TEXT NOT NULL,
+		content TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	if _, err := db.Exec(queryHistory); err != nil {
+		return nil, fmt.Errorf("failed to create chat_history table: %w", err)
 	}
 
 	// Try to add reminded column if it doesn't exist (migration for existing db)
@@ -227,6 +248,49 @@ func (p *Planner) ExportToMarkdown(filename string) error {
 		fmt.Fprintln(f)
 	}
 	return nil
+}
+
+// SaveMessage saves a chat message to the history
+func (p *Planner) SaveMessage(role, content string) error {
+	query := `INSERT INTO chat_history (role, content, created_at) VALUES (?, ?, ?)`
+	_, err := p.db.Exec(query, role, content, time.Now())
+	return err
+}
+
+// GetRecentMessages retrieves the most recent N messages
+func (p *Planner) GetRecentMessages(limit int) ([]ChatMessage, error) {
+	// We need to get the last N messages, but in chronological order.
+	// So we select order by created_at DESC limit N, then reverse or sort in Go.
+	// Or use a subquery.
+	query := `
+	SELECT id, role, content, created_at FROM (
+		SELECT id, role, content, created_at 
+		FROM chat_history 
+		ORDER BY created_at DESC 
+		LIMIT ?
+	) ORDER BY created_at ASC
+	`
+	rows, err := p.db.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query chat history: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan chat message: %w", err)
+		}
+		messages = append(messages, m)
+	}
+	return messages, nil
+}
+
+// ClearHistory clears the chat history
+func (p *Planner) ClearHistory() error {
+	_, err := p.db.Exec(`DELETE FROM chat_history`)
+	return err
 }
 
 // Close closes the database connection

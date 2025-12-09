@@ -2,28 +2,47 @@ package tui
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"gomentum/internal/agent"
+	"gomentum/internal/config"
 	"gomentum/internal/mcp"
 	"gomentum/internal/planner"
+	"log/slog"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbletea"
 	"github.com/gen2brain/beeep"
 )
 
-// Start launches the Read-Eval-Print Loop for Gomentum
+// Start launches the Bubble Tea TUI for Gomentum
 func Start() {
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Println("Welcome to Gomentum. Type 'exit' or 'quit' to leave.")
+	// Helper to pause before exit
+	waitExit := func() {
+		fmt.Println("\nPress Enter to exit...")
+		bufio.NewReader(os.Stdin).ReadString('\n')
+		os.Exit(1)
+	}
+
+	// Load Config
+	cfg, err := config.LoadConfig("config.yaml")
+	if err != nil {
+		cwd, _ := os.Getwd()
+		exe, _ := os.Executable()
+		slog.Error("Failed to load config", "error", err, "cwd", cwd, "exe", exe)
+		fmt.Printf("\nError loading config.yaml: %v\n", err)
+		fmt.Printf("Current Working Directory: %s\n", cwd)
+		fmt.Printf("Executable Path: %s\n", exe)
+		fmt.Println("Please ensure 'config.yaml' exists in the Current Working Directory.")
+		waitExit()
+	}
 
 	// Initialize Planner
-	p, err := planner.NewPlanner("gomentum.db")
+	p, err := planner.NewPlanner(cfg.Database.Path)
 	if err != nil {
-		fmt.Printf("Error: Failed to initialize planner: %v\n", err)
-		return
+		slog.Error("Failed to initialize planner", "error", err)
+		fmt.Printf("\nError initializing database: %v\n", err)
+		waitExit()
 	}
 	defer p.Close()
 
@@ -31,37 +50,24 @@ func Start() {
 	ms := mcp.NewServer(p)
 
 	// Initialize Agent
-	ag, err := agent.NewAgent(ms)
+	ag, err := agent.NewAgent(cfg, ms, p)
 	if err != nil {
-		fmt.Printf("Error: Failed to initialize agent: %v\n", err)
-		fmt.Println("Please set LLM_API_KEY environment variable.")
-		return
+		slog.Error("Failed to initialize agent", "error", err)
+		fmt.Printf("\nError initializing agent: %v\n", err)
+		fmt.Println("Please check your configuration (API Key, etc).")
+		waitExit()
 	}
 
 	// Start background reminder
 	go startReminder(p)
 
-	for {
-		fmt.Print("Gomentum > ")
-		if !scanner.Scan() {
-			break
-		}
-
-		input := strings.TrimSpace(scanner.Text())
-		if input == "" {
-			continue
-		}
-
-		if input == "exit" || input == "quit" {
-			fmt.Println("Bye!")
-			break
-		}
-
-		handleInput(context.Background(), ag, input)
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+	// Start Bubble Tea Program
+	// Note: WithAltScreen might cause issues if the terminal closes immediately after exit.
+	// But for a TUI app, it's standard.
+	prog := tea.NewProgram(InitialModel(cfg, p, ag), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		fmt.Printf("Alas, there's been an error: %v", err)
+		waitExit()
 	}
 }
 
@@ -100,12 +106,4 @@ func startReminder(p *planner.Planner) {
 	}
 }
 
-func handleInput(ctx context.Context, ag agent.Agent, input string) {
-	fmt.Print("Thinking...")
-	resp, err := ag.Chat(ctx, input)
-	if err != nil {
-		fmt.Printf("\rError: %v\n", err)
-		return
-	}
-	fmt.Printf("\r%s\n", resp)
-}
+// handleInput is removed as it is now handled by the Bubble Tea model
