@@ -9,6 +9,8 @@ import (
 	"gomentum/internal/planner"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,16 +42,79 @@ func WaitPressEnter() {
 
 // Start launches the Bubble Tea TUI for Gomentum
 func Start() {
+	// Determine config path
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("Error getting user home directory: %v\n", err)
+		os.Exit(1)
+	}
+	configDir := filepath.Join(homeDir, ".gomentum")
+	configPath := filepath.Join(configDir, "config.yaml")
+
+	// Check if config exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		fmt.Println("Configuration file not found. Starting first-run setup...")
+
+		// Create directory
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			fmt.Printf("Error creating config directory: %v\n", err)
+			os.Exit(1)
+		}
+
+		reader := bufio.NewReader(os.Stdin)
+
+		// Prompt for API Key
+		fmt.Print("Enter your LLM API Key: ")
+		apiKey, _ := reader.ReadString('\n')
+		apiKey = strings.TrimSpace(apiKey)
+
+		// Prompt for Base URL
+		fmt.Print("Enter LLM Base URL (default: https://api.deepseek.com/v1): ")
+		baseURL, _ := reader.ReadString('\n')
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = "https://api.deepseek.com/v1"
+		}
+
+		// Prompt for Model
+		fmt.Print("Enter LLM Model (default: deepseek-chat): ")
+		model, _ := reader.ReadString('\n')
+		model = strings.TrimSpace(model)
+		if model == "" {
+			model = "deepseek-chat"
+		}
+
+		// Create default config
+		cfg := &config.Config{
+			LLM: config.LLMConfig{
+				APIKey:  apiKey,
+				BaseURL: baseURL,
+				Model:   model,
+			},
+			Database: config.DatabaseConfig{
+				Path: filepath.Join(configDir, "gomentum.db"),
+			},
+			Agent: config.AgentConfig{
+				MaxHistory: 20,
+			},
+		}
+
+		// Save config
+		if err := config.SaveConfig(configPath, cfg); err != nil {
+			fmt.Printf("Error saving config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Configuration saved to %s\n", configPath)
+	}
+
 	// Load Config
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		cwd, _ := os.Getwd()
 		exe, _ := os.Executable()
 		slog.Error("Failed to load config", "error", err, "cwd", cwd, "exe", exe)
-		fmt.Printf("\nError loading config.yaml: %v\n", err)
-		fmt.Printf("Current Working Directory: %s\n", cwd)
-		fmt.Printf("Executable Path: %s\n", exe)
-		fmt.Println("Please ensure 'config.yaml' exists in the Current Working Directory.")
+		fmt.Printf("\nError loading config: %v\n", err)
+		fmt.Printf("Config Path: %s\n", configPath)
 		WaitPressEnter()
 		os.Exit(1)
 	}

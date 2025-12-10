@@ -27,11 +27,11 @@ var (
 			Padding(0, 1)
 
 	statusMessageStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#04B575", Dark: "#04B575"}).
+				Foreground(lipgloss.Color("#04B575")).
 				Render
 
 	errorMessageStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#FF0000", Dark: "#FF0000"}).
+				Foreground(lipgloss.Color("#FF0000")).
 				Render
 )
 
@@ -224,7 +224,7 @@ func (m *model) renderChat() {
 	}
 
 	renderer, _ := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(m.viewport.Width),
 	)
 	str, err := renderer.Render(content)

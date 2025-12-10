@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"gomentum/internal/tui"
 )
@@ -17,8 +19,28 @@ func main() {
 		}
 	}()
 
-	// Initialize structured logging
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	// Initialize structured logging to file
+	var logOutput io.Writer = os.Stdout // Default fallback
+
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		logDir := filepath.Join(homeDir, ".gomentum")
+		if err := os.MkdirAll(logDir, 0755); err == nil {
+			logPath := filepath.Join(logDir, "gomentum.log")
+			if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+				// We don't defer f.Close() here because we want it open for the lifetime of the app
+				// and OS will close it on exit.
+				logOutput = f
+			}
+		}
+	}
+
+	// If we failed to open file, use io.Discard to avoid messing up TUI
+	if logOutput == os.Stdout {
+		logOutput = io.Discard
+	}
+
+	logger := slog.New(slog.NewTextHandler(logOutput, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)

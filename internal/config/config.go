@@ -74,3 +74,19 @@ func LoadConfig(path string) (*Config, error) {
 
 	return cfg, nil
 }
+
+// SaveConfig saves the configuration to a file
+func SaveConfig(path string, cfg *Config) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	defer f.Close()
+
+	encoder := yaml.NewEncoder(f)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(cfg); err != nil {
+		return fmt.Errorf("failed to encode config: %w", err)
+	}
+	return nil
+}
