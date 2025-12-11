@@ -35,6 +35,11 @@ func NewServer(p *planner.Planner) *Server {
 }
 
 func (s *Server) registerTools() {
+	// Tool: current_time
+	s.mcpServer.AddTool(mcp.NewTool("current_time",
+		mcp.WithDescription("Return the current local time in RFC3339 format with timezone offset"),
+	), s.handleCurrentTime)
+
 	// Tool: add_task
 	s.mcpServer.AddTool(mcp.NewTool("add_task",
 		mcp.WithDescription("Add a new task to the schedule"),
@@ -71,6 +76,12 @@ func (s *Server) registerTools() {
 		mcp.WithDescription("Delete a task by ID"),
 		mcp.WithNumber("id", mcp.Required(), mcp.Description("The ID of the task to delete")),
 	), s.handleDeleteTask)
+}
+
+func (s *Server) handleCurrentTime(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	now := time.Now()
+	payload := fmt.Sprintf(`{"local_time":"%s"}`, now.Format(time.RFC3339))
+	return mcp.NewToolResultText(payload), nil
 }
 
 func (s *Server) handleAddTask(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -234,6 +245,9 @@ func (s *Server) GetTools() []mcp.Tool {
 	// we will manually reconstruct the definitions for the Agent to consume.
 
 	return []mcp.Tool{
+		mcp.NewTool("current_time",
+			mcp.WithDescription("Return the current local time in RFC3339 format with timezone offset"),
+		),
 		mcp.NewTool("add_task",
 			mcp.WithDescription("Add a new task to the schedule"),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The title of the task")),
@@ -281,6 +295,8 @@ func (s *Server) CallTool(ctx context.Context, name string, args map[string]inte
 	// Let's switch on name for now since we are bridging locally.
 
 	switch name {
+	case "current_time":
+		return s.handleCurrentTime(ctx, req)
 	case "add_task":
 		return s.handleAddTask(ctx, req)
 	case "list_tasks":

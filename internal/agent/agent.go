@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"time"
+	"strings"
 
 	"gomentum/internal/config"
 	gmcp "gomentum/internal/mcp"
@@ -81,9 +81,8 @@ func (a *OpenAIAgent) loadHistory() error {
 
 // Chat implements the Agent interface
 func (a *OpenAIAgent) Chat(ctx context.Context, prompt string, onToken func(string)) (string, error) {
-	// Update system prompt with current time
-	now := time.Now()
-	systemPrompt := fmt.Sprintf("You are Gomentum, a helpful planning assistant. The current local time is %s. When scheduling tasks, use this time as reference. IMPORTANT: When calling tools with start_time or end_time, you MUST use RFC3339 format with the SAME timezone offset as the current time (e.g. if current time is +08:00, use +08:00). Do not convert to UTC. If the user provides a relative time (like 'tomorrow', 'next Monday'), calculate the absolute date and EXECUTE the tool immediately. Do not ask for confirmation unless the time is ambiguous. Be concise.", now.Format(time.RFC3339))
+	// Static system prompt: force live time from tool, never cached clock
+	systemPrompt := "You are Gomentum, a helpful planning assistant. ALWAYS call the tool `current_time` before any time reasoning or scheduling to get the freshest local timestamp (RFC3339 with offset). Treat the latest `current_time` result as the only authoritative 'now' and ignore any earlier timestamps in the conversation. When calling tools with start_time or end_time, use RFC3339 with the SAME timezone offset as the current time; do not convert to UTC. If the user provides a relative time (like 'tomorrow', 'next Monday'), first call `current_time`, then calculate the absolute date and EXECUTE the scheduling tool immediately. Do not ask for confirmation unless the time is ambiguous. Be concise."
 
 	if len(a.history) > 0 && a.history[0].Role == openai.ChatMessageRoleSystem {
 		a.history[0].Content = systemPrompt
@@ -102,6 +101,12 @@ func (a *OpenAIAgent) Chat(ctx context.Context, prompt string, onToken func(stri
 	if err := a.planner.SaveMessage(openai.ChatMessageRoleUser, prompt); err != nil {
 		slog.Error("Failed to save user message", "error", err)
 	}
+
+	// Always inject a fresh current_time reading before reasoning
+	a.addCurrentTimeSnapshot(ctx, systemPrompt)
+
+	// Remove stale time-bearing messages from prior turns to avoid the model echoing old timestamps
+	a.pruneStaleTimeMessages()
 
 	// Prepare tools
 	tools := a.getOpenAITools()
@@ -282,4 +287,61 @@ func (a *OpenAIAgent) getOpenAITools() []openai.Tool {
 		})
 	}
 	return tools
+}
+
+// pruneStaleTimeMessages removes older assistant/system/tool messages that contain time statements,
+// so the model doesn't reuse outdated timestamps. The first system message is always kept.
+func (a *OpenAIAgent) pruneStaleTimeMessages() {
+	if len(a.history) == 0 {
+		return
+	}
+	systemMsg := a.history[0]
+	var filtered []openai.ChatCompletionMessage
+	filtered = append(filtered, systemMsg)
+
+	for _, msg := range a.history[1:] {
+		if msg.Role == openai.ChatMessageRoleAssistant || msg.Role == openai.ChatMessageRoleSystem || msg.Role == openai.ChatMessageRoleTool {
+			text := strings.ToLower(msg.Content)
+			if strings.Contains(text, "current_time") ||
+				strings.Contains(text, "current time") ||
+				strings.Contains(text, "local time") ||
+				strings.Contains(msg.Content, "根据系统时间") ||
+				strings.Contains(msg.Content, "当前时间") {
+				continue
+			}
+		}
+		filtered = append(filtered, msg)
+	}
+	a.history = filtered
+}
+
+// addCurrentTimeSnapshot calls the MCP current_time tool and appends the result as a system message
+// so the model always sees the freshest time before responding.
+func (a *OpenAIAgent) addCurrentTimeSnapshot(ctx context.Context, baseSystemPrompt string) {
+	result, err := a.mcpServer.CallTool(ctx, "current_time", map[string]interface{}{})
+	if err != nil || result == nil {
+		slog.Warn("current_time tool failed", "error", err)
+		return
+	}
+
+	var content string
+	for _, c := range result.Content {
+		if textContent, ok := c.(mcp.TextContent); ok {
+			content += textContent.Text
+		}
+	}
+	if content == "" {
+		return
+	}
+
+	// Replace/augment the system prompt with the live time
+	combined := fmt.Sprintf("%s Latest current_time result: %s", baseSystemPrompt, content)
+	if len(a.history) > 0 && a.history[0].Role == openai.ChatMessageRoleSystem {
+		a.history[0].Content = combined
+	} else {
+		a.history = append([]openai.ChatCompletionMessage{{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: combined,
+		}}, a.history...)
+	}
 }
