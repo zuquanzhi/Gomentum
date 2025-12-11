@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"gomentum/internal/config"
 	gmcp "gomentum/internal/mcp"
@@ -102,8 +103,8 @@ func (a *OpenAIAgent) Chat(ctx context.Context, prompt string, onToken func(stri
 		slog.Error("Failed to save user message", "error", err)
 	}
 
-	// Always inject a fresh current_time reading before reasoning
-	a.addCurrentTimeSnapshot(ctx, systemPrompt)
+	// Always inject a fresh current_time tool call/result before reasoning
+	a.ensureCurrentTimeToolCall(ctx, systemPrompt)
 
 	// Remove stale time-bearing messages from prior turns to avoid the model echoing old timestamps
 	a.pruneStaleTimeMessages()
@@ -269,7 +270,68 @@ func (a *OpenAIAgent) getContextMessages() []openai.ChatCompletionMessage {
 
 	// Reconstruct
 	msgs := append([]openai.ChatCompletionMessage{systemMsg}, remaining...)
-	return msgs
+	return ensureToolCallConsistency(msgs)
+}
+
+// ensureCurrentTimeToolCall makes a synthetic tool_call for current_time and stores its result,
+// so the model always has a live timestamp and the UI can display the tool call/response.
+func (a *OpenAIAgent) ensureCurrentTimeToolCall(ctx context.Context, baseSystemPrompt string) {
+	// Avoid duplicate within the last few messages
+	for i := len(a.history) - 1; i >= 0 && len(a.history)-i <= 6; i-- {
+		msg := a.history[i]
+		if msg.Role == openai.ChatMessageRoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				if tc.Function.Name == "current_time" {
+					return
+				}
+			}
+		}
+	}
+
+	callID := fmt.Sprintf("auto_current_time_%d", time.Now().UnixNano())
+	toolCall := openai.ToolCall{
+		ID:   callID,
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "current_time",
+			Arguments: "{}",
+		},
+	}
+
+	// Append assistant tool call
+	a.history = append(a.history, openai.ChatCompletionMessage{
+		Role:      openai.ChatMessageRoleAssistant,
+		ToolCalls: []openai.ToolCall{toolCall},
+	})
+
+	// Execute tool
+	result, err := a.mcpServer.CallTool(ctx, "current_time", map[string]interface{}{})
+	content := ""
+	if err != nil || result == nil {
+		content = fmt.Sprintf("current_time tool failed: %v", err)
+	} else {
+		for _, c := range result.Content {
+			if textContent, ok := c.(mcp.TextContent); ok {
+				content += textContent.Text
+			}
+		}
+		if content == "" {
+			content = "current_time tool returned empty content"
+		}
+	}
+
+	// Append tool response
+	a.history = append(a.history, openai.ChatCompletionMessage{
+		Role:       openai.ChatMessageRoleTool,
+		ToolCallID: callID,
+		Content:    content,
+	})
+
+	// Update system prompt with latest time context
+	combined := fmt.Sprintf("%s Latest current_time result: %s", baseSystemPrompt, content)
+	if len(a.history) > 0 && a.history[0].Role == openai.ChatMessageRoleSystem {
+		a.history[0].Content = combined
+	}
 }
 
 func (a *OpenAIAgent) getOpenAITools() []openai.Tool {
@@ -289,8 +351,8 @@ func (a *OpenAIAgent) getOpenAITools() []openai.Tool {
 	return tools
 }
 
-// pruneStaleTimeMessages removes older assistant/system/tool messages that contain time statements,
-// so the model doesn't reuse outdated timestamps. The first system message is always kept.
+// pruneStaleTimeMessages keeps only the latest current_time tool call/response
+// and drops older time-bearing messages. The first system message is always kept.
 func (a *OpenAIAgent) pruneStaleTimeMessages() {
 	if len(a.history) == 0 {
 		return
@@ -299,20 +361,171 @@ func (a *OpenAIAgent) pruneStaleTimeMessages() {
 	var filtered []openai.ChatCompletionMessage
 	filtered = append(filtered, systemMsg)
 
-	for _, msg := range a.history[1:] {
-		if msg.Role == openai.ChatMessageRoleAssistant || msg.Role == openai.ChatMessageRoleSystem || msg.Role == openai.ChatMessageRoleTool {
-			text := strings.ToLower(msg.Content)
-			if strings.Contains(text, "current_time") ||
-				strings.Contains(text, "current time") ||
-				strings.Contains(text, "local time") ||
-				strings.Contains(msg.Content, "根据系统时间") ||
-				strings.Contains(msg.Content, "当前时间") {
+	// Find the most recent current_time call ID (assistant tool call or tool response)
+	lastTimeCallID := ""
+	for i := len(a.history) - 1; i >= 1; i-- {
+		msg := a.history[i]
+		if msg.Role == openai.ChatMessageRoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				if tc.Function.Name == "current_time" {
+					lastTimeCallID = tc.ID
+					break
+				}
+			}
+		}
+		if msg.Role == openai.ChatMessageRoleTool && msg.ToolCallID != "" {
+			if strings.Contains(msg.Content, "current_time") {
+				lastTimeCallID = msg.ToolCallID
+			}
+		}
+		if lastTimeCallID != "" {
+			break
+		}
+	}
+
+	for i := 1; i < len(a.history); i++ {
+		msg := a.history[i]
+
+		// Drop orphan tool messages (must follow an assistant with matching tool_call_id)
+		if msg.Role == openai.ChatMessageRoleTool {
+			if len(filtered) == 0 {
+				continue
+			}
+			prev := filtered[len(filtered)-1]
+			if prev.Role != openai.ChatMessageRoleAssistant {
+				continue
+			}
+			match := false
+			for _, tc := range prev.ToolCalls {
+				if tc.ID == msg.ToolCallID {
+					match = true
+					break
+				}
+			}
+			if !match {
 				continue
 			}
 		}
+
+		if isTimeMessage(msg) {
+			// Keep only the latest current_time pair
+			if msg.Role == openai.ChatMessageRoleAssistant {
+				keep := false
+				for _, tc := range msg.ToolCalls {
+					if tc.ID == lastTimeCallID && tc.Function.Name == "current_time" {
+						keep = true
+						break
+					}
+				}
+				if !keep {
+					continue
+				}
+			} else if msg.Role == openai.ChatMessageRoleTool {
+				if msg.ToolCallID != lastTimeCallID {
+					continue
+				}
+			} else {
+				// Drop older time-bearing system/assistant messages
+				if lastTimeCallID != "" {
+					continue
+				}
+			}
+		}
+
 		filtered = append(filtered, msg)
 	}
+
 	a.history = filtered
+}
+
+func isTimeMessage(msg openai.ChatCompletionMessage) bool {
+	if msg.Role == openai.ChatMessageRoleAssistant {
+		for _, tc := range msg.ToolCalls {
+			if tc.Function.Name == "current_time" {
+				return true
+			}
+		}
+	}
+	if msg.Role == openai.ChatMessageRoleSystem || msg.Role == openai.ChatMessageRoleTool || msg.Role == openai.ChatMessageRoleAssistant {
+		text := strings.ToLower(msg.Content)
+		if strings.Contains(text, "current_time") ||
+			strings.Contains(text, "current time") ||
+			strings.Contains(text, "local time") ||
+			strings.Contains(msg.Content, "根据系统时间") ||
+			strings.Contains(msg.Content, "当前时间") {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureToolCallConsistency removes assistant messages that have tool_calls
+// without matching tool responses in the subsequent messages, and drops orphan
+// tool messages that don't correspond to a kept assistant message. This prevents
+// OpenAI API 400 errors about mismatched tool_call/tool messages.
+func ensureToolCallConsistency(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	if len(msgs) == 0 {
+		return msgs
+	}
+
+	// Backward scan: mark assistant messages that have all tool responses present later.
+	seenTool := map[string]bool{}
+	keep := make([]bool, len(msgs))
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		switch msg.Role {
+		case openai.ChatMessageRoleTool:
+			if msg.ToolCallID != "" {
+				seenTool[msg.ToolCallID] = true
+			}
+			// Tentatively keep; will validate in forward pass
+			keep[i] = true
+		case openai.ChatMessageRoleAssistant:
+			if len(msg.ToolCalls) == 0 {
+				keep[i] = true
+				continue
+			}
+			ok := true
+			for _, tc := range msg.ToolCalls {
+				if !seenTool[tc.ID] {
+					ok = false
+					break
+				}
+			}
+			keep[i] = ok
+		default:
+			keep[i] = true
+		}
+	}
+
+	// Forward scan: drop orphan tool messages and unresolved assistants
+	active := map[string]bool{}
+	var fixed []openai.ChatCompletionMessage
+	for i, msg := range msgs {
+		if !keep[i] {
+			continue
+		}
+
+		if msg.Role == openai.ChatMessageRoleAssistant && len(msg.ToolCalls) > 0 {
+			for _, tc := range msg.ToolCalls {
+				active[tc.ID] = true
+			}
+			fixed = append(fixed, msg)
+			continue
+		}
+
+		if msg.Role == openai.ChatMessageRoleTool {
+			if active[msg.ToolCallID] {
+				fixed = append(fixed, msg)
+				delete(active, msg.ToolCallID)
+			}
+			continue
+		}
+
+		fixed = append(fixed, msg)
+	}
+
+	return fixed
 }
 
 // addCurrentTimeSnapshot calls the MCP current_time tool and appends the result as a system message
