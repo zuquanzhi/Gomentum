@@ -8,7 +8,7 @@ on:
     inputs:
       tag:
         description: "Tag name to release (e.g. v0.1.0). Must exist."
-        required: false
+        required: true
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,7 +56,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify release tag
+      - name: Verify release tag input
         run: |
           if [ -z "${RELEASE_TAG}" ]; then
             echo "RELEASE_TAG is empty. Provide a tag (workflow_dispatch input) or run on a tag ref."
@@ -102,9 +102,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - name: Verify release tag
+      - name: Verify release tag input
         run: |
           if [ -z "${RELEASE_TAG}" ]; then
             echo "RELEASE_TAG is empty. Provide a tag (workflow_dispatch input) or run on a tag ref."
