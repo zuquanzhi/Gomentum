@@ -104,7 +104,7 @@ func (a *OpenAIAgent) Chat(ctx context.Context, prompt string, onToken func(stri
 	}
 
 	// Always inject a fresh current_time tool call/result before reasoning
-	a.ensureCurrentTimeToolCall(ctx, systemPrompt)
+	a.ensureCurrentTimeToolCall(ctx, systemPrompt, onToken)
 
 	// Remove stale time-bearing messages from prior turns to avoid the model echoing old timestamps
 	a.pruneStaleTimeMessages()
@@ -275,7 +275,7 @@ func (a *OpenAIAgent) getContextMessages() []openai.ChatCompletionMessage {
 
 // ensureCurrentTimeToolCall makes a synthetic tool_call for current_time and stores its result,
 // so the model always has a live timestamp and the UI can display the tool call/response.
-func (a *OpenAIAgent) ensureCurrentTimeToolCall(ctx context.Context, baseSystemPrompt string) {
+func (a *OpenAIAgent) ensureCurrentTimeToolCall(ctx context.Context, baseSystemPrompt string, onToken func(string)) {
 	// Avoid duplicate within the last few messages
 	for i := len(a.history) - 1; i >= 0 && len(a.history)-i <= 6; i-- {
 		msg := a.history[i]
@@ -303,6 +303,9 @@ func (a *OpenAIAgent) ensureCurrentTimeToolCall(ctx context.Context, baseSystemP
 		Role:      openai.ChatMessageRoleAssistant,
 		ToolCalls: []openai.ToolCall{toolCall},
 	})
+	if onToken != nil {
+		onToken(fmt.Sprintf("\n| Executing %s...\n", toolCall.Function.Name))
+	}
 
 	// Execute tool
 	result, err := a.mcpServer.CallTool(ctx, "current_time", map[string]interface{}{})
@@ -318,6 +321,9 @@ func (a *OpenAIAgent) ensureCurrentTimeToolCall(ctx context.Context, baseSystemP
 		if content == "" {
 			content = "current_time tool returned empty content"
 		}
+	}
+	if onToken != nil {
+		onToken(fmt.Sprintf("| %s result: %s\n", toolCall.Function.Name, content))
 	}
 
 	// Append tool response

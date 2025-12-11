@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"gomentum/internal/agent"
 	"gomentum/internal/config"
@@ -42,10 +43,14 @@ type taskItem struct {
 	description string
 	status      string
 	startTime   string
+	endTime     string
+	state       string
 }
 
-func (t taskItem) Title() string       { return t.title }
-func (t taskItem) Description() string { return fmt.Sprintf("[%s] %s", t.startTime, t.description) }
+func (t taskItem) Title() string { return fmt.Sprintf("%s %s", t.state, t.title) }
+func (t taskItem) Description() string {
+	return fmt.Sprintf("[%s - %s] %s", t.startTime, t.endTime, t.description)
+}
 func (t taskItem) FilterValue() string { return t.title }
 
 type errMsg error
@@ -118,6 +123,20 @@ Type a message to start planning.`)
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, m.refreshTasks)
+}
+
+func taskStateLabel(status string, end time.Time, now time.Time) string {
+	switch status {
+	case "completed":
+		return "✓ Completed"
+	case "in_progress":
+		return "… In progress"
+	default:
+		if end.Before(now) {
+			return "⚠ Overdue"
+		}
+		return "• Pending"
+	}
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -242,6 +261,7 @@ func (m model) refreshTasks() tea.Msg {
 	}
 
 	items := []list.Item{}
+	now := time.Now()
 	for _, t := range tasks {
 		items = append(items, taskItem{
 			id:          t.ID,
@@ -249,6 +269,8 @@ func (m model) refreshTasks() tea.Msg {
 			description: t.Description,
 			status:      t.Status,
 			startTime:   t.StartTime.Local().Format("15:04"),
+			endTime:     t.EndTime.Local().Format("15:04"),
+			state:       taskStateLabel(t.Status, t.EndTime, now),
 		})
 	}
 	return items
