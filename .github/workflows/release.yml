@@ -32,6 +32,8 @@ jobs:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: test
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -54,16 +56,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify release tag
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "RELEASE_TAG is empty. Provide a tag (workflow_dispatch input) or run on a tag ref."
+            exit 1
+          fi
       - name: Build and package
         id: package
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
+          RELEASE_TAG="${RELEASE_TAG}"
           BINARY_NAME="gomentum"
-          ARCHIVE_BASENAME="gomentum_${VERSION}_${GOOS}_${GOARCH}"
+          ARCHIVE_BASENAME="gomentum_${RELEASE_TAG}_${GOOS}_${GOARCH}"
           OUTPUT_DIR="dist"
 
           mkdir -p "${OUTPUT_DIR}"
@@ -94,7 +101,15 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Verify release tag
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "RELEASE_TAG is empty. Provide a tag (workflow_dispatch input) or run on a tag ref."
+            exit 1
+          fi
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -104,5 +119,6 @@ jobs:
         with:
           files: dist/**/*
           generate_release_notes: true
+          tag_name: ${{ env.RELEASE_TAG }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
