@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go test
+        run: go test ./...
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and package
+        id: package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          BINARY_NAME="gomentum"
+          ARCHIVE_BASENAME="gomentum_${VERSION}_${GOOS}_${GOARCH}"
+          OUTPUT_DIR="dist"
+
+          mkdir -p "${OUTPUT_DIR}"
+
+          if [ "${GOOS}" = "windows" ]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
+
+          go build -o "${OUTPUT_DIR}/${BINARY_NAME}" ./cmd/gomentum
+
+          if [ "${GOOS}" = "windows" ]; then
+            ARCHIVE="${ARCHIVE_BASENAME}.zip"
+            (cd "${OUTPUT_DIR}" && zip "${ARCHIVE}" "${BINARY_NAME}")
+          else
+            ARCHIVE="${ARCHIVE_BASENAME}.tar.gz"
+            (cd "${OUTPUT_DIR}" && tar -czf "${ARCHIVE}" "${BINARY_NAME}")
+          fi
+
+          echo "artifact_path=${OUTPUT_DIR}/${ARCHIVE}" >> "$GITHUB_OUTPUT"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gomentum-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.package.outputs.artifact_path }}
+          compression-level: 0
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
